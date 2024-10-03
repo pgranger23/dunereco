@@ -34,7 +34,8 @@ art_make( BASENAME_ONLY
   ROOT_EG
   cetlib::cetlib cetlib_except
   ROOT_BASIC_LIB_LIST
-  
+  ROOT::Minuit
+  ROOT::Minuit2
   ROOT_TMVA
   )
 
