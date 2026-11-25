@@ -7,9 +7,15 @@
 
 BEGIN_PROLOG
 
+# Features: the model inputs, by name, in the order the model was trained with
+# (available names in FlashMatchBDTAlg.cxx). Hit-based features make the module read
+# the OpFlash-OpHit associations; charge features make it match each PFParticle.
+
 standard_flashmatchbdtalg:
 {
     WeightFile:        "FlashMatch/bdt_augmented.bin"
+    Features:          [ "log10_pe", "dy", "dz", "abs_dy", "abs_dz", "chi2", "chi",
+                         "y_width", "z_width", "width_sum", "pe_rank", "log10_pe_ratio", "n_candidates" ]
     PEThreshold:       100.0   # Minimum flash PE for candidate selection
     SpatialSigma:      62.64   # Spatial resolution scale sigma [cm]
     MinBDTScore:       0.30    # Minimum BDT probability to accept match
@@ -27,5 +33,35 @@ standard_flashmatchbdt:
 }
 
 dune10kt_flashmatchbdt: @local::standard_flashmatchbdt
+
+# FD vertical drift, 10 ppm Xe: the flash is selected from the light alone.
+# Input flashes: OpFlashFinderVerticalDrift with the dunefdvd_opflash_atmos settings (duneopdet)
+# and MinChannels: 3. Model trained on the FD-VD 1x8x14 atmospheric sample with radiological
+# background. On 9,380 independent events it selects the neutrino flash (leading edge within 1 us)
+# for 99.93% of CC and 89.8% of NC fiducial events, against 99.85% / 83.8% for the brightest flash
+# with >= 20 channels. Adding the Pandora vertex did not improve this.
+dunefdvd_flashmatchbdtalg:
+{
+    WeightFile:        "FlashMatch/bdt_vd_light.bin"
+    Features:          [ "log10_pe", "n_channels", "n_hits", "y", "z", "hit_y_width", "hit_z_width",
+                         "frac_cathode", "frac_membrane_neg_y", "frac_membrane_pos_y",
+                         "frac_top1_channel", "frac_top3_channels", "duration",
+                         "pe_rank", "log10_pe_ratio", "pe_rank_wide", "log10_pe_ratio_wide", "n_candidates" ]
+    PEThreshold:       50.0
+    MinChannels:       3
+    WideMinChannels:   20
+    CathodeX:          -320.0
+    MinBDTScore:       0.0     # the highest-scoring candidate is always kept (as validated)
+}
+
+dunefdvd_flashmatchbdt:
+{
+    module_type:            "FlashMatchBDT"
+    FlashModuleLabel:       "opflashatmos"
+    PFParticleModuleLabel:  "pandora"
+    SelectPrimaryOnly:      true
+    MatchWithoutPFParticle: true    # keep the T0 when Pandora finds no neutrino
+    BDTAlg:                 @local::dunefdvd_flashmatchbdtalg
+}
 
 END_PROLOG
