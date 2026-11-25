@@ -182,8 +182,11 @@ void FlashMatchBDTAlg::Setup()
     fUsesCharge |= it->second.source == Source::Charge;
   }
 
-  fModel.Load(fConfig.weight_file);
-  if (fModel.IsLoaded() && fModel.NumFeatures() != fFeatures.size()) {
+  if (!fModel.Load(fConfig.weight_file)) {
+    throw cet::exception("FlashMatchBDTAlg") << "Cannot load the BDT model \"" << fConfig.weight_file
+                                             << "\" (searched as given, then in FW_SEARCH_PATH and FHICL_FILE_PATH)\n";
+  }
+  if (fModel.NumFeatures() != fFeatures.size()) {
     throw cet::exception("FlashMatchBDTAlg") << fConfig.weight_file << " has " << fModel.NumFeatures()
                                              << " features, but " << fFeatures.size() << " are configured\n";
   }
