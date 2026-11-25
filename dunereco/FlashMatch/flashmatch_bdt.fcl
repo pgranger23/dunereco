@@ -28,4 +28,33 @@ standard_flashmatchbdt:
 
 dune10kt_flashmatchbdt: @local::standard_flashmatchbdt
 
+# FD vertical drift, 10 ppm Xe (FeatureSet "VD"): the flash is selected from the light alone.
+# Input flashes: OpFlashFinderVerticalDrift with the dunefdvd_opflash_atmos settings (duneopdet)
+# and MinChannels: 3, so that flashes below 20 channels stay candidates; the features use the
+# OpFlash-OpHit associations of that producer. Model trained on the FD-VD 1x8x14 atmospheric
+# sample with radiological background. On 9,380 independent events it selects the neutrino flash
+# (leading edge within 1 us) for 99.93% of CC and 89.8% of NC fiducial events, against
+# 99.85% / 83.8% for the brightest flash with >= 20 channels. Adding the Pandora vertex did not
+# improve this, so no charge position is used.
+dunefdvd_flashmatchbdtalg:
+{
+    FeatureSet:        "VD"
+    WeightFile:        "FlashMatch/bdt_vd_light.bin"
+    PEThreshold:       50.0    # minimum flash PE of a candidate
+    MinChannels:       3       # minimum distinct optical channels of a candidate
+    RankMinChannels:   20      # second PE ranking among candidates with >= 20 channels
+    CathodeX:          -320.0  # PDs with x below this are on the cathode [cm]
+    MinBDTScore:       0.0     # the highest-scoring candidate is always kept (as validated)
+}
+
+dunefdvd_flashmatchbdt:
+{
+    module_type:            "FlashMatchBDT"
+    FlashModuleLabel:       "opflashatmos"
+    PFParticleModuleLabel:  "pandora"
+    SelectPrimaryOnly:      true
+    MatchWithoutPFParticle: true    # keep the T0 when Pandora finds no neutrino
+    BDTAlg:                 @local::dunefdvd_flashmatchbdtalg
+}
+
 END_PROLOG

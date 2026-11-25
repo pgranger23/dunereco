@@ -4,6 +4,9 @@ cet_build_plugin(FlashMatchBDT art::EDProducer
   FlashMatchBDTAlg.cxx
   BDTModel.cxx
   LIBRARIES PRIVATE
+  larcore::Geometry_Geometry_service
+  larcorealg::Geometry
+  cetlib_except::cetlib_except
   lardataobj::AnalysisBase
   lardataobj::RecoBase
   art::Framework_Principal
@@ -15,6 +18,6 @@ cet_build_plugin(FlashMatchBDT art::EDProducer
 
 install_headers()
 install_fhicl()
-install_fhicl(LIST bdt_augmented.bin bdt_baseline.bin SUBDIRNAME FlashMatch)
+install_fhicl(LIST bdt_augmented.bin bdt_baseline.bin bdt_vd_light.bin SUBDIRNAME FlashMatch)
 install_source()
 install_scripts(LIST scripts/export_bin_bdt.py)

@@ -7,6 +7,11 @@
  * Reconstructs interaction T0 and establishes associations between
  * recob::PFParticle, anab::T0, and recob::OpFlash.
  *
+ * FeatureSet "VD" (BDTAlg): the flash is selected from the light alone, using the OpHits of
+ * each flash (OpFlash-OpHit associations of the flash producer), see FlashMatchBDTAlg::MatchVD.
+ * There is one T0 per event, associated with every (primary) PFParticle; with
+ * MatchWithoutPFParticle it is also kept when there is no PFParticle.
+ *
  * \author Pierre Granger (pierre.granger@cern.ch)
  * \date 2026
  */
@@ -15,14 +20,18 @@
 #include "art/Framework/Core/ModuleMacros.h"
 #include "art/Framework/Principal/Event.h"
 #include "art/Framework/Principal/Handle.h"
+#include "art/Framework/Services/Registry/ServiceHandle.h"
 #include "art/Persistency/Common/PtrMaker.h"
 #include "canvas/Persistency/Common/FindManyP.h"
 #include "canvas/Utilities/InputTag.h"
 #include "fhiclcpp/ParameterSet.h"
 #include "messagefacility/MessageLogger/MessageLogger.h"
 
+#include "larcore/Geometry/WireReadout.h"
+#include "larcorealg/Geometry/OpDetGeo.h"
 #include "lardataobj/AnalysisBase/T0.h"
 #include "lardataobj/RecoBase/OpFlash.h"
+#include "lardataobj/RecoBase/OpHit.h"
 #include "lardataobj/RecoBase/PFParticle.h"
 #include "lardataobj/RecoBase/Vertex.h"
 #include "lardataobj/RecoBase/SpacePoint.h"
@@ -46,10 +55,17 @@ public:
   void produce(art::Event& evt) override;
 
 private:
+  void ProduceVD(art::Event const& evt,
+                 art::Handle<std::vector<recob::OpFlash>> const& flashHandle,
+                 std::vector<anab::T0>& t0Col,
+                 art::Assns<recob::PFParticle, anab::T0>& pfpT0Assn,
+                 art::Assns<anab::T0, recob::OpFlash>& t0FlashAssn) const;
+
   art::InputTag fFlashModuleLabel;
   art::InputTag fPFParticleModuleLabel;
   art::InputTag fSpacePointModuleLabel;
   bool fSelectPrimaryOnly;
+  bool fMatchWithoutPFParticle;   ///< VD: keep the T0 of events without PFParticle
 
   FlashMatchBDTAlg fBDTAlg;
 };
@@ -60,6 +76,7 @@ FlashMatchBDT::FlashMatchBDT(fhicl::ParameterSet const& p)
   , fPFParticleModuleLabel(p.get<art::InputTag>("PFParticleModuleLabel", "pandora"))
   , fSpacePointModuleLabel(p.get<art::InputTag>("SpacePointModuleLabel", "pandora"))
   , fSelectPrimaryOnly(p.get<bool>("SelectPrimaryOnly", true))
+  , fMatchWithoutPFParticle(p.get<bool>("MatchWithoutPFParticle", false))
   , fBDTAlg(p.get<fhicl::ParameterSet>("BDTAlg", fhicl::ParameterSet{}))
 {
   produces<std::vector<anab::T0>>();
@@ -77,6 +94,14 @@ void FlashMatchBDT::produce(art::Event& evt)
   art::Handle<std::vector<recob::OpFlash>> flashHandle;
   if (!evt.getByLabel(fFlashModuleLabel, flashHandle) || !flashHandle.isValid() || flashHandle->empty()) {
     mf::LogDebug("FlashMatchBDT") << "No OpFlashes found with label " << fFlashModuleLabel.encode();
+    evt.put(std::move(t0Col));
+    evt.put(std::move(pfpT0Assn));
+    evt.put(std::move(t0FlashAssn));
+    return;
+  }
+
+  if (fBDTAlg.IsVD()) {
+    ProduceVD(evt, flashHandle, *t0Col, *pfpT0Assn, *t0FlashAssn);
     evt.put(std::move(t0Col));
     evt.put(std::move(pfpT0Assn));
     evt.put(std::move(t0FlashAssn));
@@ -177,6 +202,49 @@ void FlashMatchBDT::produce(art::Event& evt)
   evt.put(std::move(t0Col));
   evt.put(std::move(pfpT0Assn));
   evt.put(std::move(t0FlashAssn));
+}
+
+void FlashMatchBDT::ProduceVD(art::Event const& evt,
+                              art::Handle<std::vector<recob::OpFlash>> const& flashHandle,
+                              std::vector<anab::T0>& t0Col,
+                              art::Assns<recob::PFParticle, anab::T0>& pfpT0Assn,
+                              art::Assns<anab::T0, recob::OpFlash>& t0FlashAssn) const
+{
+  // OpHits of each flash, placed at the centre of their photon detector
+  art::FindManyP<recob::OpHit> flashToHits(flashHandle, evt, fFlashModuleLabel);
+  auto const& wireReadout = art::ServiceHandle<geo::WireReadout const>()->Get();
+  std::vector<std::vector<FlashHit>> hits(flashHandle->size());
+  for (size_t i = 0; i < flashHandle->size(); ++i) {
+    for (auto const& hit : flashToHits.at(i)) {
+      auto const c = wireReadout.OpDetGeoFromOpChannel(hit->OpChannel()).GetCenter();
+      hits[i].push_back({hit->PE(), hit->PeakTime(), c.X(), c.Y(), c.Z(), hit->OpChannel()});
+    }
+  }
+
+  // The match uses the light only, so it is the same for every PFParticle of the event
+  const MatchResult res = fBDTAlg.MatchVD(*flashHandle, hits);
+  if (!res.matched) return;
+
+  std::vector<art::Ptr<recob::PFParticle>> pfps;
+  art::Handle<std::vector<recob::PFParticle>> pfpHandle;
+  if (evt.getByLabel(fPFParticleModuleLabel, pfpHandle)) {
+    for (size_t iPfp = 0; iPfp < pfpHandle->size(); ++iPfp) {
+      if (!fSelectPrimaryOnly || (*pfpHandle)[iPfp].IsPrimary()) pfps.emplace_back(pfpHandle, iPfp);
+    }
+  }
+  if (pfps.empty() && !fMatchWithoutPFParticle) return;
+
+  const double t0_ns = res.flash_time * 1.0e3; // convert us to ns
+  t0Col.emplace_back(t0_ns, 1, res.flash_idx, 0, res.bdt_score);
+  art::Ptr<anab::T0> t0Ptr = art::PtrMaker<anab::T0>{evt}(0);
+  t0FlashAssn.addSingle(t0Ptr, art::Ptr<recob::OpFlash>(flashHandle, res.flash_idx));
+  for (auto const& pfp : pfps) {
+    pfpT0Assn.addSingle(pfp, t0Ptr);
+  }
+
+  mf::LogInfo("FlashMatchBDT") << "Matched OpFlash #" << res.flash_idx << " (T0 = " << t0_ns
+                               << " ns, BDT = " << res.bdt_score << ", PE = " << res.pe << ") to "
+                               << pfps.size() << " PFParticle(s)";
 }
 
 } // namespace flashmatch
